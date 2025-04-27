@@ -56,7 +56,7 @@ import java.util.Date
 
 class OsMapActivity : AppCompatActivity() {
 
-    val RADIUS_OF_EARTH_KM = 6378
+    val RADIUS_EARTH_METERS = 6378137;
     private lateinit var binding: ActivityOsMapBinding
     private lateinit var map: MapView
     private val bogota = GeoPoint(4.62, -74.07)
@@ -67,8 +67,8 @@ class OsMapActivity : AppCompatActivity() {
     lateinit var locationClient: FusedLocationProviderClient
     private lateinit var locationRequest: LocationRequest
     private lateinit var locationCallback: LocationCallback
-    private var currentLocation: GeoPoint? = null
-    private var currentLocationMarker: Marker? = null
+    private var locationActual: GeoPoint? = null
+    private var markerLocationActual: Marker? = null
     private lateinit var sensorManager: SensorManager
     private var lightSensor: Sensor? = null
     private lateinit var sensorEventListener: SensorEventListener
@@ -104,32 +104,19 @@ class OsMapActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityOsMapBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-        lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
-        sensorEventListener = createSensorEventListener()
-        Configuration.getInstance().load(
-            this,
-            androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
-        )
-        map = binding.osmMap
-        map.setTileSource(
-            TileSourceFactory.MAPNIK
-        )
-        map.setMultiTouchControls(true)
-        map.overlays.add(createOverlayEvents())
-        roadManager = OSRMRoadManager(this, "ANDROID")
-        geocoder = Geocoder(this)
+        inicializarSensor()
+        inicializarMapa()
+        inicializarSuscrLocalizacion()
+        inicializarListenersBotones()
         val policy = StrictMode.ThreadPolicy.Builder().permitAll().build()
         StrictMode.setThreadPolicy(policy)
-        locationClient = LocationServices.getFusedLocationProviderClient(this)
-        locationRequest = createLocationRequest()
-        locationCallback = createLocationCallback()
+    }
 
+    fun inicializarListenersBotones() {
         binding.address.setOnEditorActionListener { _, i, _ ->
             if (i == EditorInfo.IME_ACTION_SEARCH) {
                 val text = binding.address.text.toString()
                 val latlong = findLocation(text)
-
                 if (this@OsMapActivity::map.isInitialized) {
                     if (latlong != null) {
                         val loc = GeoPoint(latlong.latitude, latlong.longitude)
@@ -149,6 +136,33 @@ class OsMapActivity : AppCompatActivity() {
         binding.drawRutasJson.setOnClickListener {
             drawRoutesDeJson()
         }
+    }
+
+    fun inicializarSuscrLocalizacion() {
+        locationClient = LocationServices.getFusedLocationProviderClient(this)
+        locationRequest = createLocationRequest()
+        locationCallback = createLocationCallback()
+    }
+
+    fun inicializarMapa() {
+        Configuration.getInstance().load(
+            this,
+            androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+        )
+        map = binding.osmMap
+        map.setTileSource(
+            TileSourceFactory.MAPNIK
+        )
+        map.setMultiTouchControls(true)
+        map.overlays.add(createOverlayEvents())
+        roadManager = OSRMRoadManager(this, "ANDROID")
+        geocoder = Geocoder(this)
+    }
+
+    fun inicializarSensor() {
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
+        sensorEventListener = createSensorEventListener()
     }
 
     override fun onResume() {
@@ -173,7 +187,7 @@ class OsMapActivity : AppCompatActivity() {
         if (uims.nightMode == UiModeManager.MODE_NIGHT_YES) {
             map.overlayManager.tilesOverlay.setColorFilter(TilesOverlay.INVERT_COLORS)
         }
-        currentLocation?.let {
+        locationActual?.let {
             map.controller.animateTo(it)
         } ?: run {
             map.controller.animateTo(bogota)
@@ -253,7 +267,7 @@ class OsMapActivity : AppCompatActivity() {
             if (longPressedMarker != null) {
                 map.getOverlays().add(longPressedMarker)
             }
-            currentLocation?.let {
+            locationActual?.let {
                 var distancia = distance(it.latitude, it.longitude, p.latitude, p.longitude)
                 Toast.makeText(baseContext,"Distancia: $distancia",Toast.LENGTH_SHORT).show()
             }
@@ -262,7 +276,7 @@ class OsMapActivity : AppCompatActivity() {
                 p, "Ubicación por busqueda", snippet, R.drawable.baseline_location_alt_24
             )
             map.overlays.add(searchMarker)
-            currentLocation?.let {
+            locationActual?.let {
                 var distancia = distance(it.latitude, it.longitude, p.latitude, p.longitude)
                 Toast.makeText(baseContext,"Distancia: $distancia",Toast.LENGTH_SHORT).show()
             }
@@ -310,9 +324,9 @@ class OsMapActivity : AppCompatActivity() {
     }
 
     fun drawRoute() {
-        if (currentLocation != null && locationBuscada != null && locationLongPressed!= null) {
+        if (locationActual != null && locationBuscada != null && locationLongPressed!= null) {
             val routePoints = ArrayList<GeoPoint>()
-            routePoints.add(currentLocation!!)
+            routePoints.add(locationActual!!)
             routePoints.add(locationBuscada!!)
             routePoints.add(locationLongPressed!!)
 
@@ -396,19 +410,32 @@ class OsMapActivity : AppCompatActivity() {
         val newLocation = GeoPoint(location.latitude, location.longitude)
         val address = findAddress(LatLng(location.latitude, location.longitude))
 
-        val shouldMoveCamera = currentLocation == null ||
-                currentLocation!!.distanceToAsDouble(newLocation) > 30.0
+        var moverCamara = false
+        var guardarJSON = false
 
-        val shouldSave = currentLocation == null ||
-                currentLocation!!.distanceToAsDouble(newLocation) > 30.0
+        if (locationActual == null) {
+            moverCamara = true
+            guardarJSON = true
+        } else {
+            val distancia = distance(
+                locationActual!!.latitude,
+                locationActual!!.longitude,
+                newLocation.latitude,
+                newLocation.longitude
+            )
 
-        if (shouldSave) {
-            currentLocation = newLocation
+            if (distancia > 30.0) {
+                moverCamara = true
+                guardarJSON = true
+            }
+        }
+        if (guardarJSON) {
+            locationActual = newLocation
             writeJSONObject()
             drawRouteTresPuntos()
         }
 
-        currentLocationMarker?.let {
+        markerLocationActual?.let {
             map.overlays.remove(it)
         }
 
@@ -420,15 +447,15 @@ class OsMapActivity : AppCompatActivity() {
         )
 
         map.overlays.add(newMarker)
-        currentLocationMarker = newMarker
+        markerLocationActual = newMarker
 
-        if (shouldMoveCamera) {
+        if (moverCamara) {
             map.controller.animateTo(newLocation)
         }
     }
 
     fun writeJSONObject() {
-        currentLocation?.let {
+        locationActual?.let {
             val myLocation = MyLocation(
                 Date(System.currentTimeMillis()),
                 it.latitude,
@@ -453,14 +480,14 @@ class OsMapActivity : AppCompatActivity() {
                 Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
                 Math.sin(lngDistance / 2) * Math.sin(lngDistance / 2)
         val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        val result = RADIUS_OF_EARTH_KM * c;
+        val result = RADIUS_EARTH_METERS * c;
         return Math.round(result*100.0)/100.0;
     }
 
     fun drawRouteTresPuntos() {
-        if (currentLocation != null && locationBuscada != null && locationLongPressed != null) {
+        if (locationActual != null && locationBuscada != null && locationLongPressed != null) {
             val routePoints = arrayListOf(
-                currentLocation!!,
+                locationActual!!,
                 locationBuscada!!,
                 locationLongPressed!!
             )
